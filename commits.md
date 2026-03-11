@@ -91,3 +91,26 @@
 - Lines: 61.92%
 - All conversion files: 100%
 - image-handler.ts: 100%
+
+## Phase 5: Auth
+
+### Commit 5 — API key auth, CORS, Google OAuth, JWT
+
+**Files created:**
+- `src/middleware/auth.ts` — API key Bearer token validation, dev mode pass-through
+- `src/middleware/auth.test.ts` — 5 tests (dev mode, missing header, bad format, wrong key, correct key)
+- `src/middleware/cors.ts` — CORS headers with exposed custom headers
+- `src/middleware/cors.test.ts` — 2 tests (regular request headers, OPTIONS preflight)
+- `src/routes/auth.ts` — Google OAuth flow (/auth/google, /auth/callback), JWT create/verify, /auth/me, /auth/logout
+- `src/routes/auth.test.ts` — 9 tests (JWT create/verify, OAuth not configured, missing code, cookie auth, logout)
+
+**Files modified:**
+- `src/index.ts` — wired CORS globally, API key auth on /v1/*, auth routes, session cleanup
+
+**Tests:** 120 passing (13 test files)
+**Coverage:**
+- Statements: 63.63%
+- Branches: 67.21%
+- Functions: 84.21%
+- Lines: 62.59%
+- auth middleware: 100%, cors: 100%, error-handler: 100%
