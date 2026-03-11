@@ -9,6 +9,8 @@ export interface SDKQueryParams {
   effort?: "low" | "medium" | "high";
   stream: boolean;
   includeUsageInStream: boolean;
+  conversationId?: string | null;
+  messageCount: number;
 }
 
 export function extractTextFromContent(
@@ -65,6 +67,7 @@ export function convertRequest(req: OpenAIChatRequest): SDKQueryParams {
     effort,
     stream,
     includeUsageInStream,
+    messageCount: req.messages.length,
   };
 }
 

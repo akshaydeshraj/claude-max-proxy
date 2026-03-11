@@ -48,3 +48,25 @@
 - Route handler (chat-completions.ts): 95.83% statements
 - Pure logic files (conversion/, model-map, semaphore): 100%
 - SDK service.ts: 0% (requires Agent SDK — tested via mocked route tests)
+
+## Phase 3: Session Management (multi-turn)
+
+### Commit 3 — Session-based multi-turn conversation support
+
+**Files created:**
+- `src/sdk/sessions.ts` — in-memory session store with conversation ID resolution (header or message hash), TTL cleanup, CRUD operations
+- `src/sdk/sessions.test.ts` — 18 tests covering hash prefix, conversation ID resolution, session CRUD, TTL cleanup, interval management
+
+**Files modified:**
+- `src/conversion/openai-to-sdk.ts` — added `conversationId` and `messageCount` to `SDKQueryParams`
+- `src/sdk/service.ts` — added session resolution/storage, passes `resume` to SDK for multi-turn, returns `sdkSessionId`
+- `src/routes/chat-completions.ts` — resolves conversation ID from header/messages, passes to SDK, returns `X-Conversation-Id` and `X-Session-Id` headers
+
+**Tests:** 81 passing (9 test files)
+**Coverage:**
+- Statements: 58.74%
+- Branches: 65.76%
+- Functions: 78.68%
+- Lines: 57.56%
+- sessions.ts: 100% statements
+- Pure logic files (conversion/, model-map, semaphore): 100%

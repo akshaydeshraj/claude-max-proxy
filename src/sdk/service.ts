@@ -11,6 +11,7 @@ import {
   mapResultSubtype,
 } from "../conversion/sdk-to-openai.js";
 import { Semaphore } from "./semaphore.js";
+import { getSession, setSession, updateSessionUsage } from "./sessions.js";
 import { config } from "../config.js";
 import type { OpenAIChatResponse } from "../types/openai.js";
 
@@ -38,6 +39,7 @@ export interface SDKCompletionResult {
   cacheCreationTokens: number;
   cacheReadTokens: number;
   durationMs: number;
+  sdkSessionId?: string;
 }
 
 export interface SDKStreamResult {
@@ -52,7 +54,11 @@ export interface SDKStreamResult {
   }>;
 }
 
-function buildSDKOptions(params: SDKQueryParams, abortController: AbortController) {
+function buildSDKOptions(
+  params: SDKQueryParams,
+  abortController: AbortController,
+  sdkSessionId?: string,
+) {
   const options: Record<string, unknown> = {
     model: params.model,
     allowedTools: [],
@@ -70,8 +76,40 @@ function buildSDKOptions(params: SDKQueryParams, abortController: AbortControlle
   if (params.effort) {
     options.effort = params.effort;
   }
+  if (sdkSessionId) {
+    options.resume = sdkSessionId;
+  }
 
   return options;
+}
+
+function resolveSDKSessionId(conversationId?: string | null): string | undefined {
+  if (!conversationId) return undefined;
+  const session = getSession(conversationId);
+  return session?.sdkSessionId;
+}
+
+function storeSession(
+  conversationId: string | null | undefined,
+  sdkSessionId: string | undefined,
+  model: string,
+  messageCount: number,
+): void {
+  if (!conversationId || !sdkSessionId) return;
+
+  const existing = getSession(conversationId);
+  if (existing) {
+    updateSessionUsage(conversationId, messageCount);
+  } else {
+    const now = Date.now();
+    setSession(conversationId, {
+      sdkSessionId,
+      model,
+      createdAt: now,
+      lastUsedAt: now,
+      messageCount,
+    });
+  }
 }
 
 function setupAbort(abortSignal?: AbortSignal) {
@@ -116,10 +154,12 @@ export async function completeNonStreaming(
 
   try {
     const { abortController, timeout } = setupAbort(abortSignal);
-    const options = buildSDKOptions(params, abortController);
+    const existingSessionId = resolveSDKSessionId(params.conversationId);
+    const options = buildSDKOptions(params, abortController, existingSessionId);
 
     let content = "";
     let finishReason = "stop";
+    let sdkSessionId: string | undefined;
     let stats = { costUsd: 0, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
 
     const q = query({
@@ -139,10 +179,14 @@ export async function completeNonStreaming(
           ? mapResultSubtype(message.subtype)
           : "stop";
         stats = extractUsageFromResult(message);
+        sdkSessionId = (message as Record<string, unknown>).session_id as string | undefined;
       }
     }
 
     clearTimeout(timeout);
+
+    // Store session for multi-turn
+    storeSession(params.conversationId, sdkSessionId, params.model, params.messageCount);
 
     const durationMs = Date.now() - startTime;
     const usage = buildUsage(stats.inputTokens, stats.outputTokens);
@@ -157,6 +201,7 @@ export async function completeNonStreaming(
       response,
       ...stats,
       durationMs,
+      sdkSessionId,
     };
   } finally {
     semaphore.release();
@@ -191,7 +236,8 @@ export function completeStreaming(
 
       try {
         const { abortController, timeout } = setupAbort(abortSignal);
-        const options = buildSDKOptions(params, abortController);
+        const existingSessionId = resolveSDKSessionId(params.conversationId);
+        const options = buildSDKOptions(params, abortController, existingSessionId);
 
         const q = query({
           prompt: params.prompt,
@@ -221,6 +267,10 @@ export function completeStreaming(
             const finishReason = message.subtype
               ? mapResultSubtype(message.subtype)
               : "stop";
+
+            // Store session for multi-turn
+            const sdkSessionId = (message as Record<string, unknown>).session_id as string | undefined;
+            storeSession(params.conversationId, sdkSessionId, params.model, params.messageCount);
 
             // Finish chunk
             const finishChunk = buildStreamChunk({

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { convertRequest, validateRequest } from "../conversion/openai-to-sdk.js";
 import { completeNonStreaming, completeStreaming } from "../sdk/service.js";
+import { resolveConversationId } from "../sdk/sessions.js";
 import { badRequest, serverError, rateLimited } from "../middleware/error-handler.js";
 import type { OpenAIChatRequest } from "../types/openai.js";
 
@@ -43,11 +44,25 @@ chatCompletions.post("/v1/chat/completions", async (c) => {
 
   const params = convertRequest(body);
 
+  // Resolve conversation ID for session-based multi-turn
+  const conversationId = resolveConversationId(
+    c.req.header("X-Conversation-Id"),
+    body.messages,
+  );
+  params.conversationId = conversationId;
+
   // Non-streaming
   if (!params.stream) {
     try {
       const result = await completeNonStreaming(params, c.req.raw.signal);
-      return c.json(result.response);
+      const headers: Record<string, string> = {};
+      if (conversationId) {
+        headers["X-Conversation-Id"] = conversationId;
+      }
+      if (result.sdkSessionId) {
+        headers["X-Session-Id"] = result.sdkSessionId;
+      }
+      return c.json(result.response, 200, headers);
     } catch (err: unknown) {
       return handleSDKError(c, err);
     }
@@ -57,13 +72,16 @@ chatCompletions.post("/v1/chat/completions", async (c) => {
   try {
     const { stream } = completeStreaming(params, c.req.raw.signal);
 
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
-    });
+    const headers: Record<string, string> = {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    };
+    if (conversationId) {
+      headers["X-Conversation-Id"] = conversationId;
+    }
+
+    return new Response(stream, { headers });
   } catch (err: unknown) {
     return handleSDKError(c, err);
   }
