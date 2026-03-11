@@ -3,3 +3,6 @@ dist/
 .env
 coverage/
 tasks/
+data/*.db
+data/*.db-wal
+data/*.db-shm

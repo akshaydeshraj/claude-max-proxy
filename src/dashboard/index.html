@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Max Proxy — Dashboard</title>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f1117;
+      color: #e4e4e7;
+      min-height: 100vh;
+    }
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 32px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid #27272a;
+    }
+    h1 { font-size: 24px; font-weight: 600; color: #fafafa; }
+    h2 { font-size: 16px; font-weight: 500; color: #a1a1aa; margin-bottom: 12px; }
+    .period-select {
+      background: #1c1c22;
+      color: #e4e4e7;
+      border: 1px solid #3f3f46;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    .stat-card {
+      background: #1c1c22;
+      border: 1px solid #27272a;
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .stat-label { font-size: 13px; color: #71717a; margin-bottom: 4px; }
+    .stat-value { font-size: 28px; font-weight: 700; color: #fafafa; }
+    .stat-sub { font-size: 12px; color: #52525b; margin-top: 2px; }
+    .chart-container {
+      background: #1c1c22;
+      border: 1px solid #27272a;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    .chart-container canvas { max-height: 300px; }
+    .models-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    .model-card {
+      background: #1c1c22;
+      border: 1px solid #27272a;
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .model-name { font-size: 15px; font-weight: 600; color: #fafafa; margin-bottom: 8px; }
+    .model-stat { font-size: 13px; color: #a1a1aa; margin-bottom: 4px; }
+    .model-stat span { color: #fafafa; font-weight: 500; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th { text-align: left; color: #71717a; padding: 8px 12px; border-bottom: 1px solid #27272a; }
+    td { padding: 8px 12px; border-bottom: 1px solid #1c1c22; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .badge-success { background: #052e16; color: #4ade80; }
+    .badge-error { background: #450a0a; color: #f87171; }
+    .badge-stream { background: #172554; color: #60a5fa; }
+    a { color: #60a5fa; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .loading { color: #52525b; text-align: center; padding: 40px; }
+  </style>
+</head>
+<body>
+  <div class="container" x-data="dashboard()" x-init="init()">
+    <header>
+      <h1>Claude Max Proxy</h1>
+      <div>
+        <select class="period-select" x-model="period" @change="fetchAll()">
+          <option value="1h">Last hour</option>
+          <option value="24h" selected>Last 24h</option>
+          <option value="7d">Last 7 days</option>
+          <option value="30d">Last 30 days</option>
+          <option value="all">All time</option>
+        </select>
+        <a href="/auth/logout" style="margin-left:16px;font-size:13px;">Logout</a>
+      </div>
+    </header>
+
+    <!-- Summary Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Requests</div>
+        <div class="stat-value" x-text="fmt(stats.totalRequests)">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Input Tokens</div>
+        <div class="stat-value" x-text="fmt(stats.totalInputTokens)">—</div>
+        <div class="stat-sub" x-text="'Cache read: ' + fmt(stats.totalCacheReadTokens)"></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Output Tokens</div>
+        <div class="stat-value" x-text="fmt(stats.totalOutputTokens)">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Est. Cost</div>
+        <div class="stat-value" x-text="'$' + stats.totalCostUsd.toFixed(4)">—</div>
+        <div class="stat-sub" x-text="'Avg latency: ' + Math.round(stats.avgDurationMs) + 'ms'"></div>
+      </div>
+    </div>
+
+    <!-- Hourly Chart -->
+    <div class="chart-container">
+      <h2>Requests Over Time</h2>
+      <canvas id="hourlyChart"></canvas>
+    </div>
+
+    <!-- Model Breakdown -->
+    <h2>By Model</h2>
+    <div class="models-grid">
+      <template x-for="m in models" :key="m.model">
+        <div class="model-card">
+          <div class="model-name" x-text="m.model"></div>
+          <div class="model-stat">Requests: <span x-text="fmt(m.requestCount)"></span></div>
+          <div class="model-stat">Input: <span x-text="fmt(m.totalInputTokens)"></span></div>
+          <div class="model-stat">Output: <span x-text="fmt(m.totalOutputTokens)"></span></div>
+          <div class="model-stat">Cost: <span x-text="'$' + m.totalCostUsd.toFixed(4)"></span></div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Recent Requests -->
+    <div class="chart-container">
+      <h2>Recent Requests</h2>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Model</th>
+              <th>Type</th>
+              <th>Input</th>
+              <th>Output</th>
+              <th>Cache</th>
+              <th>Cost</th>
+              <th>Latency</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in recent" :key="r.id">
+              <tr>
+                <td x-text="new Date(r.created_at).toLocaleTimeString()"></td>
+                <td x-text="r.model"></td>
+                <td><span class="badge badge-stream" x-show="r.stream">stream</span></td>
+                <td x-text="fmt(r.input_tokens)"></td>
+                <td x-text="fmt(r.output_tokens)"></td>
+                <td x-text="fmt(r.cache_read_tokens)"></td>
+                <td x-text="'$' + r.cost_usd.toFixed(4)"></td>
+                <td x-text="r.duration_ms + 'ms'"></td>
+                <td>
+                  <span class="badge badge-success" x-show="r.status==='success'">ok</span>
+                  <span class="badge badge-error" x-show="r.status==='error'">err</span>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function dashboard() {
+      return {
+        period: '24h',
+        stats: { totalRequests: 0, totalInputTokens: 0, totalOutputTokens: 0, totalCacheCreationTokens: 0, totalCacheReadTokens: 0, totalCostUsd: 0, avgDurationMs: 0 },
+        models: [],
+        hourly: [],
+        recent: [],
+        chart: null,
+
+        async init() {
+          await this.fetchAll();
+          setInterval(() => this.fetchAll(), 30000);
+        },
+
+        async fetchAll() {
+          const p = `period=${this.period}`;
+          const [s, m, h, r] = await Promise.all([
+            fetch(`/api/stats/summary?${p}`).then(r => r.json()),
+            fetch(`/api/stats/models?${p}`).then(r => r.json()),
+            fetch(`/api/stats/hourly?${p}`).then(r => r.json()),
+            fetch('/api/stats/recent?limit=50').then(r => r.json()),
+          ]);
+          this.stats = s;
+          this.models = m;
+          this.hourly = h;
+          this.recent = r;
+          this.renderChart();
+        },
+
+        fmt(n) {
+          if (n == null) return '0';
+          return n.toLocaleString();
+        },
+
+        renderChart() {
+          const ctx = document.getElementById('hourlyChart');
+          if (this.chart) this.chart.destroy();
+
+          this.chart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+              labels: this.hourly.map(h => h.hour.split(' ')[1] || h.hour),
+              datasets: [{
+                label: 'Requests',
+                data: this.hourly.map(h => h.requestCount),
+                backgroundColor: '#3b82f6',
+                borderRadius: 4,
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { grid: { color: '#27272a' }, ticks: { color: '#71717a' } },
+                y: { grid: { color: '#27272a' }, ticks: { color: '#71717a' }, beginAtZero: true }
+              }
+            }
+          });
+        }
+      };
+    }
+  </script>
+</body>
+</html>

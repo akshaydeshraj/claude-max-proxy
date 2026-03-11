@@ -1,0 +1,25 @@
+services:
+  claude-proxy:
+    build: .
+    ports:
+      - "3456:3456"
+    volumes:
+      - proxy-data:/data
+      - ~/.claude:/root/.claude:ro
+    environment:
+      - PORT=3456
+      - DB_PATH=/data/analytics.db
+      - API_KEY=${API_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - ALLOWED_EMAILS=${ALLOWED_EMAILS}
+      - JWT_SECRET=${JWT_SECRET}
+      - PUBLIC_URL=${PUBLIC_URL}
+      - MAX_CONCURRENT_REQUESTS=${MAX_CONCURRENT_REQUESTS:-3}
+      - MAX_BUDGET_PER_REQUEST=${MAX_BUDGET_PER_REQUEST:-0.50}
+      - REQUEST_TIMEOUT_MS=${REQUEST_TIMEOUT_MS:-300000}
+      - SESSION_TTL_HOURS=${SESSION_TTL_HOURS:-24}
+    restart: unless-stopped
+
+volumes:
+  proxy-data:

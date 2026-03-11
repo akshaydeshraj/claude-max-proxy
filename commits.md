@@ -137,3 +137,36 @@
 - Functions: 79.12%
 - Lines: 60.81%
 - db/index.ts: 100%, db/queries.ts: 100%
+
+## Phase 7: Docker + Dashboard
+
+### Commit 7 — Dockerfile, docker-compose, dashboard SPA, .env.example
+
+**Files created:**
+- `Dockerfile` — Node.js 22 slim with Claude CLI, multi-stage build
+- `docker-compose.yml` — service config with SQLite + credentials volumes
+- `.env.example` — all configurable environment variables
+- `src/dashboard/index.html` — SPA with Alpine.js + Chart.js (dark theme, stats cards, hourly chart, model breakdown, recent requests table)
+
+**Files modified:**
+- `src/routes/dashboard.ts` — added GET /dashboard serving the SPA HTML
+- `.gitignore` — added SQLite db files
+
+**Tests:** 129 passing (14 test files)
+**Coverage:**
+- Statements: 61.06%
+- Branches: 66.54%
+- Functions: 78.26%
+- Lines: 60.00%
+
+### Summary: All 7 Phases Complete
+
+| Phase | Tests | Key Coverage |
+|-------|-------|-------------|
+| 1. Core Proxy | 53 | conversion: 100% |
+| 2. Streaming | 63 | route handler: 96% |
+| 3. Sessions | 81 | sessions: 100% |
+| 4. Images | 104 | image-handler: 100% |
+| 5. Auth | 120 | auth middleware: 100% |
+| 6. Analytics | 129 | db: 100% |
+| 7. Docker | 129 | TypeScript compiles clean |

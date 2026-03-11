@@ -1,7 +1,12 @@
 import { Hono } from "hono";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { verifyJWT } from "./auth.js";
 import { getStats, getStatsByModel, getHourlyStats, getRecentRequests } from "../db/queries.js";
 import { config } from "../config.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const dashboard = new Hono();
 
@@ -34,6 +39,18 @@ async function dashboardAuth(
 // Apply auth to all dashboard routes
 dashboard.use("/dashboard*", dashboardAuth);
 dashboard.use("/api/stats*", dashboardAuth);
+
+/**
+ * GET /dashboard — Serve the dashboard SPA.
+ */
+dashboard.get("/dashboard", (c) => {
+  try {
+    const html = readFileSync(join(__dirname, "../dashboard/index.html"), "utf-8");
+    return c.html(html);
+  } catch {
+    return c.text("Dashboard not found. Ensure src/dashboard/index.html is built.", 404);
+  }
+});
 
 /**
  * GET /api/stats/summary — Aggregate stats with optional time filter.
