@@ -1,7 +1,6 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { v4 as uuidv4 } from "uuid";
 import type { SDKQueryParams } from "../conversion/openai-to-sdk.js";
-import type { AnthropicContentBlock } from "../conversion/image-handler.js";
 import {
   buildChatResponse,
   buildUsage,
@@ -84,11 +83,25 @@ function buildSDKOptions(
   return options;
 }
 
-function buildPromptArg(params: SDKQueryParams) {
+function buildPromptArg(
+  params: SDKQueryParams,
+): string | AsyncIterable<SDKUserMessage> {
   if (params.promptContentBlocks && params.promptContentBlocks.length > 0) {
-    // Pass content blocks (text + images) via the prompt field.
-    // The SDK accepts these when cast appropriately.
-    return params.promptContentBlocks as never;
+    // For multimodal (images), wrap content blocks in an SDKUserMessage
+    // delivered via an async iterable, as required by the SDK.
+    const userMessage: SDKUserMessage = {
+      type: "user",
+      message: {
+        role: "user",
+        content: params.promptContentBlocks as SDKUserMessage["message"]["content"],
+      },
+      parent_tool_use_id: null,
+      session_id: "",
+    };
+    async function* gen() {
+      yield userMessage;
+    }
+    return gen();
   }
   return params.prompt;
 }
