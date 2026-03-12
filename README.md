@@ -1,6 +1,11 @@
 # claude-max-proxy
 
-An OpenAI-compatible API proxy for Claude Max subscribers. Use your Claude Max subscription with any tool that supports the OpenAI API — Cursor, Continue, Open WebUI, and more.
+[![CI](https://github.com/akshaydeshraj/claude-max-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/akshaydeshraj/claude-max-proxy/actions/workflows/ci.yml)
+[![Node.js](https://img.shields.io/badge/node-22-brightgreen)](https://nodejs.org)
+[![TypeScript](https://img.shields.io/badge/typescript-5.x-blue)](https://www.typescriptlang.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+
+An OpenAI-compatible API proxy for Claude Max subscribers. Use your Claude Max subscription with any tool that supports the OpenAI API format.
 
 **No hacks. No magic. Just format translation using Anthropic's official SDK.**
 
@@ -32,7 +37,7 @@ Anthropic employees have explicitly confirmed personal use is fine:
 ## Quick Start
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/claude-max-proxy.git
+git clone https://github.com/akshaydeshraj/claude-max-proxy.git
 cd claude-max-proxy
 npm install
 
@@ -58,25 +63,6 @@ curl http://localhost:3456/v1/chat/completions \
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
-
-## Using with Tools
-
-**Cursor** — Settings → Models → OpenAI API Base: `http://localhost:3456/v1`
-
-**Continue** — `~/.continue/config.json`:
-```json
-{
-  "models": [{
-    "title": "Claude (Max)",
-    "provider": "openai",
-    "model": "sonnet",
-    "apiBase": "http://localhost:3456/v1",
-    "apiKey": "your-secret-key-here"
-  }]
-}
-```
-
-**Open WebUI** — Settings → Connections → OpenAI API: `http://localhost:3456/v1`
 
 ## Configuration
 
@@ -124,12 +110,6 @@ The compose file mounts `~/.claude` (read-only) for credentials and a volume for
 | `reasoning_effort` | Mapped to SDK effort |
 | `stream_options.include_usage` | Supported |
 | `max_tokens` | Not supported (SDK limitation) |
-
-## Known Limitations
-
-- `max_tokens` / `max_completion_tokens` not supported (Agent SDK limitation)
-- `n > 1` not supported (single completion per request)
-- Extended thinking + streaming not available simultaneously (SDK limitation)
 
 ## License
 
