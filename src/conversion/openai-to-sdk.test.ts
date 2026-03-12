@@ -160,7 +160,7 @@ describe("extractLastUserContentBlocks", () => {
 describe("convertRequest", () => {
   it("converts a basic request", () => {
     const req: OpenAIChatRequest = {
-      model: "sonnet",
+      model: "claude-sonnet-4-6",
       messages: [
         { role: "system", content: "Be concise" },
         { role: "user", content: "Hello" },
@@ -175,9 +175,17 @@ describe("convertRequest", () => {
     expect(result.includeUsageInStream).toBe(false);
   });
 
+  it("passes model through as-is (no mapping)", () => {
+    const req: OpenAIChatRequest = {
+      model: "sonnet",
+      messages: [{ role: "user", content: "Hi" }],
+    };
+    expect(convertRequest(req).model).toBe("sonnet");
+  });
+
   it("handles streaming with usage", () => {
     const req: OpenAIChatRequest = {
-      model: "opus",
+      model: "claude-opus-4-6",
       messages: [{ role: "user", content: "Hi" }],
       stream: true,
       stream_options: { include_usage: true },
@@ -317,17 +325,17 @@ describe("validateRequest", () => {
     ).toBe("n > 1 is not supported");
   });
 
-  it("rejects tool_choice required", () => {
+  it("allows tool_choice required (tools now supported)", () => {
     expect(
       validateRequest({
         model: "sonnet",
         messages: [{ role: "user", content: "Hi" }],
         tool_choice: "required",
       }),
-    ).toBe("tool use is not supported by this proxy");
+    ).toBeNull();
   });
 
-  it("allows tool_choice auto (ignored)", () => {
+  it("allows tool_choice auto", () => {
     expect(
       validateRequest({
         model: "sonnet",
@@ -335,5 +343,67 @@ describe("validateRequest", () => {
         tool_choice: "auto",
       }),
     ).toBeNull();
+  });
+});
+
+describe("convertRequest with tools", () => {
+  it("passes tools through to SDK params", () => {
+    const req: OpenAIChatRequest = {
+      model: "sonnet",
+      messages: [{ role: "user", content: "Hi" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "get_weather",
+            description: "Get weather",
+            parameters: { type: "object", properties: { location: { type: "string" } } },
+          },
+        },
+      ],
+    };
+
+    const result = convertRequest(req);
+    expect(result.tools).toHaveLength(1);
+    expect(result.tools![0].function.name).toBe("get_weather");
+  });
+
+  it("sets tools to undefined when empty", () => {
+    const req: OpenAIChatRequest = {
+      model: "sonnet",
+      messages: [{ role: "user", content: "Hi" }],
+      tools: [],
+    };
+
+    const result = convertRequest(req);
+    expect(result.tools).toBeUndefined();
+  });
+
+  it("injects tool result context into system prompt", () => {
+    const req: OpenAIChatRequest = {
+      model: "sonnet",
+      messages: [
+        { role: "user", content: "What's the weather?" },
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            { id: "call_1", type: "function", function: { name: "get_weather", arguments: '{"location":"SF"}' } },
+          ],
+        },
+        { role: "tool", content: "72°F", tool_call_id: "call_1" },
+        { role: "user", content: "Thanks, and in NYC?" },
+      ],
+      tools: [
+        {
+          type: "function",
+          function: { name: "get_weather", description: "Get weather" },
+        },
+      ],
+    };
+
+    const result = convertRequest(req);
+    expect(result.systemPrompt).toContain("get_weather");
+    expect(result.systemPrompt).toContain("72°F");
   });
 });

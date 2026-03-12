@@ -1,6 +1,7 @@
-import type { OpenAIChatRequest, OpenAIMessage } from "../types/openai.js";
-import { mapModel, mapEffort } from "./model-map.js";
+import type { OpenAIChatRequest, OpenAIMessage, OpenAITool } from "../types/openai.js";
+import { mapEffort } from "./model-map.js";
 import { convertContentParts, type AnthropicContentBlock } from "./image-handler.js";
+import { hasToolResultMessages, buildToolResultContext } from "./tool-handler.js";
 
 export interface SDKQueryParams {
   prompt: string;
@@ -13,6 +14,8 @@ export interface SDKQueryParams {
   includeUsageInStream: boolean;
   conversationId?: string | null;
   messageCount: number;
+  /** OpenAI tool definitions, passed through for MCP server creation. */
+  tools?: OpenAITool[];
 }
 
 export function extractTextFromContent(
@@ -77,7 +80,7 @@ export function hasImageContent(messages: OpenAIMessage[]): boolean {
 }
 
 export function convertRequest(req: OpenAIChatRequest): SDKQueryParams {
-  const model = mapModel(req.model);
+  const model = req.model;
   let systemPrompt = extractSystemPrompt(req.messages);
   const prompt = extractLastUserMessage(req.messages);
   const promptContentBlocks = extractLastUserContentBlocks(req.messages);
@@ -102,6 +105,15 @@ export function convertRequest(req: OpenAIChatRequest): SDKQueryParams {
     }
   }
 
+  // Handle tool result messages by injecting context into system prompt
+  const tools = req.tools && req.tools.length > 0 ? req.tools : undefined;
+  if (tools && hasToolResultMessages(req.messages)) {
+    const toolContext = buildToolResultContext(tools, req.messages);
+    systemPrompt = systemPrompt
+      ? `${systemPrompt}\n\n${toolContext}`
+      : toolContext;
+  }
+
   return {
     prompt,
     promptContentBlocks,
@@ -111,6 +123,7 @@ export function convertRequest(req: OpenAIChatRequest): SDKQueryParams {
     stream,
     includeUsageInStream,
     messageCount: req.messages.length,
+    tools,
   };
 }
 
@@ -129,14 +142,6 @@ export function validateRequest(req: unknown): string | null {
 
   if (r.n !== undefined && r.n > 1) {
     return "n > 1 is not supported";
-  }
-
-  if (
-    r.tool_choice &&
-    typeof r.tool_choice === "string" &&
-    r.tool_choice === "required"
-  ) {
-    return "tool use is not supported by this proxy";
   }
 
   return null;

@@ -63,15 +63,16 @@ describe("POST /v1/chat/completions", () => {
       expect(body.error.message).toContain("n > 1");
     });
 
-    it("rejects tool_choice required", async () => {
+    it("accepts tool_choice required (tools now supported)", async () => {
+      // tool_choice: "required" is now accepted since tool calling is supported
+      // The request will proceed to the SDK (mocked), not fail validation
       const res = await makeRequest({
         model: "sonnet",
         messages: [{ role: "user", content: "hi" }],
         tool_choice: "required",
       });
-      expect(res.status).toBe(400);
-      const body = await res.json();
-      expect(body.error.message).toContain("tool use");
+      // Should not be a 400 validation error
+      expect(res.status).not.toBe(400);
     });
   });
 

@@ -144,3 +144,90 @@ describe("formatSSEDone", () => {
     expect(formatSSEDone()).toBe("data: [DONE]\n\n");
   });
 });
+
+describe("buildChatResponse with tool calls", () => {
+  it("sets finish_reason to tool_calls when tool calls present", () => {
+    const toolCalls = [
+      {
+        id: "call_123",
+        type: "function" as const,
+        function: { name: "get_weather", arguments: '{"location":"SF"}' },
+      },
+    ];
+
+    const resp = buildChatResponse({
+      content: "",
+      model: "claude-sonnet-4-6",
+      finishReason: "stop",
+      usage: buildUsage(10, 5),
+      toolCalls,
+    });
+
+    expect(resp.choices[0].finish_reason).toBe("tool_calls");
+    expect(resp.choices[0].message.content).toBeNull();
+    expect(resp.choices[0].message.tool_calls).toEqual(toolCalls);
+  });
+
+  it("does not include tool_calls when empty", () => {
+    const resp = buildChatResponse({
+      content: "Hello!",
+      model: "claude-sonnet-4-6",
+      finishReason: "stop",
+      usage: buildUsage(10, 5),
+    });
+
+    expect(resp.choices[0].finish_reason).toBe("stop");
+    expect(resp.choices[0].message.content).toBe("Hello!");
+    expect(resp.choices[0].message.tool_calls).toBeUndefined();
+  });
+
+  it("does not include tool_calls when array is empty", () => {
+    const resp = buildChatResponse({
+      content: "Hello!",
+      model: "claude-sonnet-4-6",
+      finishReason: "stop",
+      usage: buildUsage(10, 5),
+      toolCalls: [],
+    });
+
+    expect(resp.choices[0].finish_reason).toBe("stop");
+    expect(resp.choices[0].message.tool_calls).toBeUndefined();
+  });
+});
+
+describe("buildStreamChunk with tool calls", () => {
+  it("includes tool call deltas", () => {
+    const chunk = buildStreamChunk({
+      id: "chatcmpl-123",
+      model: "claude-sonnet-4-6",
+      role: "assistant",
+      toolCalls: [
+        {
+          index: 0,
+          id: "call_123",
+          type: "function",
+          function: { name: "get_weather", arguments: "" },
+        },
+      ],
+    });
+
+    expect(chunk.choices[0].delta.tool_calls).toHaveLength(1);
+    expect(chunk.choices[0].delta.tool_calls![0].function?.name).toBe("get_weather");
+  });
+
+  it("includes argument deltas", () => {
+    const chunk = buildStreamChunk({
+      id: "chatcmpl-123",
+      model: "claude-sonnet-4-6",
+      toolCalls: [
+        {
+          index: 0,
+          function: { arguments: '{"loc' },
+        },
+      ],
+    });
+
+    expect(chunk.choices[0].delta.tool_calls).toHaveLength(1);
+    expect(chunk.choices[0].delta.tool_calls![0].function?.arguments).toBe('{"loc');
+  });
+});

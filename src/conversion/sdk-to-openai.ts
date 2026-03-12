@@ -3,6 +3,8 @@ import type {
   OpenAIChatResponse,
   OpenAIChatChunk,
   OpenAIUsage,
+  OpenAIToolCall,
+  OpenAIToolCallDelta,
 } from "../types/openai.js";
 
 export function mapStopReason(
@@ -48,7 +50,17 @@ export function buildChatResponse(params: {
   model: string;
   finishReason: string;
   usage: OpenAIUsage;
+  toolCalls?: OpenAIToolCall[];
 }): OpenAIChatResponse {
+  const message: OpenAIChatResponse["choices"][0]["message"] = {
+    role: "assistant",
+    content: params.toolCalls && params.toolCalls.length > 0 ? null : params.content,
+  };
+
+  if (params.toolCalls && params.toolCalls.length > 0) {
+    message.tool_calls = params.toolCalls;
+  }
+
   return {
     id: `chatcmpl-${uuidv4()}`,
     object: "chat.completion",
@@ -57,11 +69,10 @@ export function buildChatResponse(params: {
     choices: [
       {
         index: 0,
-        message: {
-          role: "assistant",
-          content: params.content,
-        },
-        finish_reason: params.finishReason,
+        message,
+        finish_reason: params.toolCalls && params.toolCalls.length > 0
+          ? "tool_calls"
+          : params.finishReason,
       },
     ],
     usage: params.usage,
@@ -75,6 +86,7 @@ export function buildStreamChunk(params: {
   role?: "assistant";
   finishReason?: string | null;
   usage?: OpenAIUsage | null;
+  toolCalls?: OpenAIToolCallDelta[];
 }): OpenAIChatChunk {
   const chunk: OpenAIChatChunk = {
     id: params.id,
@@ -95,6 +107,9 @@ export function buildStreamChunk(params: {
   }
   if (params.content !== undefined) {
     chunk.choices[0].delta.content = params.content;
+  }
+  if (params.toolCalls !== undefined) {
+    chunk.choices[0].delta.tool_calls = params.toolCalls;
   }
   if (params.usage !== undefined) {
     chunk.usage = params.usage;

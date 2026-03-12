@@ -36,6 +36,17 @@ export interface OpenAIStreamOptions {
   include_usage?: boolean;
 }
 
+export interface OpenAIFunctionDef {
+  name: string;
+  description?: string;
+  parameters?: Record<string, unknown>;
+}
+
+export interface OpenAITool {
+  type: "function";
+  function: OpenAIFunctionDef;
+}
+
 export interface OpenAIChatRequest {
   model: string;
   messages: OpenAIMessage[];
@@ -54,7 +65,7 @@ export interface OpenAIChatRequest {
   top_logprobs?: number;
   seed?: number;
   user?: string;
-  tools?: unknown[];
+  tools?: OpenAITool[];
   tool_choice?: string | object;
   response_format?: { type: string; json_schema?: unknown };
   reasoning_effort?: "low" | "medium" | "high";
@@ -80,6 +91,7 @@ export interface OpenAIChatChoice {
   message: {
     role: "assistant";
     content: string | null;
+    tool_calls?: OpenAIToolCall[];
   };
   finish_reason: string;
 }
@@ -93,11 +105,22 @@ export interface OpenAIChatChunk {
   usage?: OpenAIUsage | null;
 }
 
+export interface OpenAIToolCallDelta {
+  index: number;
+  id?: string;
+  type?: "function";
+  function?: {
+    name?: string;
+    arguments?: string;
+  };
+}
+
 export interface OpenAIChatChunkChoice {
   index: number;
   delta: {
     role?: "assistant";
     content?: string;
+    tool_calls?: OpenAIToolCallDelta[];
   };
   finish_reason: string | null;
 }

@@ -13,7 +13,8 @@ import {
 import { Semaphore } from "./semaphore.js";
 import { getSession, setSession, updateSessionUsage } from "./sessions.js";
 import { config } from "../config.js";
-import type { OpenAIChatResponse } from "../types/openai.js";
+import type { OpenAIChatResponse, OpenAIToolCall, OpenAIToolCallDelta } from "../types/openai.js";
+import { createToolMcpServer, type ToolCallCapture } from "../conversion/tool-handler.js";
 
 const semaphore = new Semaphore(config.maxConcurrentRequests);
 
@@ -58,6 +59,7 @@ function buildSDKOptions(
   params: SDKQueryParams,
   abortController: AbortController,
   sdkSessionId?: string,
+  toolCapture?: { capture: ToolCallCapture },
 ) {
   const options: Record<string, unknown> = {
     model: params.model,
@@ -78,6 +80,16 @@ function buildSDKOptions(
   }
   if (sdkSessionId) {
     options.resume = sdkSessionId;
+  }
+
+  // If tools are provided, create MCP server and configure
+  if (params.tools && params.tools.length > 0 && toolCapture) {
+    const mcpServer = createToolMcpServer(params.tools, toolCapture.capture);
+    options.mcpServers = { "openai-tools": mcpServer };
+    // Allow MCP tools to be called — dontAsk silently denies all tool use
+    options.permissionMode = "bypassPermissions";
+    // Remove disallowed tools so MCP tools can work
+    delete options.disallowedTools;
   }
 
   return options;
@@ -176,10 +188,17 @@ export async function completeNonStreaming(
   const startTime = Date.now();
 
   const { abortController, timeout } = setupAbort(abortSignal);
+  const hasTools = params.tools && params.tools.length > 0;
+  const toolCapture: ToolCallCapture = { toolCalls: [], textContent: "" };
 
   try {
     const existingSessionId = resolveSDKSessionId(params.conversationId);
-    const options = buildSDKOptions(params, abortController, existingSessionId);
+    const options = buildSDKOptions(
+      params,
+      abortController,
+      existingSessionId,
+      hasTools ? { capture: toolCapture } : undefined,
+    );
 
     let content = "";
     let finishReason = "stop";
@@ -217,6 +236,7 @@ export async function completeNonStreaming(
       model: params.model,
       finishReason,
       usage,
+      toolCalls: toolCapture.toolCalls.length > 0 ? toolCapture.toolCalls : undefined,
     });
 
     return {
@@ -252,15 +272,27 @@ export function completeStreaming(
 
   const encoder = new TextEncoder();
   const startTime = Date.now();
+  const hasTools = params.tools && params.tools.length > 0;
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       await semaphore.acquire();
       const { abortController, timeout } = setupAbort(abortSignal);
+      const toolCapture: ToolCallCapture = { toolCalls: [], textContent: "" };
+
+      // Track streaming tool_use blocks: SDK content block index → { openaiIndex, id, name, argsJson }
+      const streamingToolCalls: Map<number, { openaiIndex: number; id: string; name: string; argsJson: string }> = new Map();
+      let nextToolCallIndex = 0;
+      let toolCallDetected = false;
 
       try {
         const existingSessionId = resolveSDKSessionId(params.conversationId);
-        const options = buildSDKOptions(params, abortController, existingSessionId);
+        const options = buildSDKOptions(
+          params,
+          abortController,
+          existingSessionId,
+          hasTools ? { capture: toolCapture } : undefined,
+        );
 
         const q = query({
           prompt: buildPromptArg(params),
@@ -268,61 +300,112 @@ export function completeStreaming(
         });
 
         for await (const message of q) {
-          if (message.type === "stream_event") {
-            const event = (message as unknown as { event: { type: string; delta?: { type: string; text?: string } } }).event;
+            if (message.type === "stream_event") {
+              const event = (message as unknown as { event: { type: string; index?: number; content_block?: Record<string, unknown>; delta?: Record<string, unknown> } }).event;
 
-            if (
-              event.type === "content_block_delta" &&
-              event.delta?.type === "text_delta" &&
-              event.delta.text
-            ) {
-              const chunk = buildStreamChunk({
+              if (
+                event.type === "content_block_delta" &&
+                event.delta?.type === "text_delta" &&
+                (event.delta as { text?: string }).text &&
+                !toolCallDetected
+              ) {
+                const chunk = buildStreamChunk({
+                  id: chunkId,
+                  model: params.model,
+                  content: (event.delta as { text: string }).text,
+                  role: firstChunk ? "assistant" : undefined,
+                });
+                controller.enqueue(encoder.encode(formatSSE(chunk)));
+                firstChunk = false;
+              }
+
+              // Detect tool_use content blocks in stream
+              if (event.type === "content_block_start" && event.content_block?.type === "tool_use") {
+                const idx = event.index ?? 0;
+                const block = event.content_block as { id: string; name: string };
+                // Strip MCP namespace prefix (e.g. "mcp__openai-tools__get_weather" → "get_weather")
+                const toolName = block.name.replace(/^mcp__[^_]+__/, "");
+                const toolIdx = nextToolCallIndex++;
+                toolCallDetected = true;
+                streamingToolCalls.set(idx, { openaiIndex: toolIdx, id: block.id, name: toolName, argsJson: "" });
+
+                // Emit first tool call chunk
+                const toolDelta: OpenAIToolCallDelta = {
+                  index: toolIdx,
+                  id: `call_${uuidv4()}`,
+                  type: "function",
+                  function: { name: toolName, arguments: "" },
+                };
+                const chunk = buildStreamChunk({
+                  id: chunkId,
+                  model: params.model,
+                  role: firstChunk ? "assistant" : undefined,
+                  toolCalls: [toolDelta],
+                });
+                controller.enqueue(encoder.encode(formatSSE(chunk)));
+                firstChunk = false;
+              }
+
+              if (
+                event.type === "content_block_delta" &&
+                event.delta?.type === "input_json_delta"
+              ) {
+                const partialJson = (event.delta as { partial_json?: string }).partial_json ?? "";
+                const idx = event.index ?? 0;
+                const existing = streamingToolCalls.get(idx);
+                if (existing) {
+                  existing.argsJson += partialJson;
+                  // Emit argument delta chunk
+                  const toolDelta: OpenAIToolCallDelta = {
+                    index: existing.openaiIndex,
+                    function: { arguments: partialJson },
+                  };
+                  const chunk = buildStreamChunk({
+                    id: chunkId,
+                    model: params.model,
+                    toolCalls: [toolDelta],
+                  });
+                  controller.enqueue(encoder.encode(formatSSE(chunk)));
+                }
+              }
+            } else if (message.type === "result") {
+              const stats = extractUsageFromResult(message);
+              const finishReason = message.subtype
+                ? mapResultSubtype(message.subtype)
+                : "stop";
+
+              // Store session for multi-turn
+              const sdkSessionId = (message as Record<string, unknown>).session_id as string | undefined;
+              storeSession(params.conversationId, sdkSessionId, params.model, params.messageCount);
+
+              // Finish chunk
+              const finishChunk = buildStreamChunk({
                 id: chunkId,
                 model: params.model,
-                content: event.delta.text,
-                role: firstChunk ? "assistant" : undefined,
+                finishReason: streamingToolCalls.size > 0 ? "tool_calls" : finishReason,
               });
-              controller.enqueue(encoder.encode(formatSSE(chunk)));
-              firstChunk = false;
-            }
-          } else if (message.type === "result") {
-            const stats = extractUsageFromResult(message);
-            const finishReason = message.subtype
-              ? mapResultSubtype(message.subtype)
-              : "stop";
+              controller.enqueue(encoder.encode(formatSSE(finishChunk)));
 
-            // Store session for multi-turn
-            const sdkSessionId = (message as Record<string, unknown>).session_id as string | undefined;
-            storeSession(params.conversationId, sdkSessionId, params.model, params.messageCount);
+              // Usage chunk if requested
+              if (params.includeUsageInStream) {
+                const usageChunk = buildStreamChunk({
+                  id: chunkId,
+                  model: params.model,
+                  usage: buildUsage(stats.inputTokens, stats.outputTokens),
+                });
+                controller.enqueue(encoder.encode(formatSSE(usageChunk)));
+              }
 
-            // Finish chunk
-            const finishChunk = buildStreamChunk({
-              id: chunkId,
-              model: params.model,
-              finishReason,
-            });
-            controller.enqueue(encoder.encode(formatSSE(finishChunk)));
+              // Done
+              controller.enqueue(encoder.encode(formatSSEDone()));
 
-            // Usage chunk if requested
-            if (params.includeUsageInStream) {
-              const usageChunk = buildStreamChunk({
-                id: chunkId,
-                model: params.model,
-                usage: buildUsage(stats.inputTokens, stats.outputTokens),
+              statsResolve({
+                ...stats,
+                durationMs: Date.now() - startTime,
               });
-              controller.enqueue(encoder.encode(formatSSE(usageChunk)));
             }
-
-            // Done
-            controller.enqueue(encoder.encode(formatSSEDone()));
-
-            statsResolve({
-              ...stats,
-              durationMs: Date.now() - startTime,
-            });
           }
-        }
-      } catch (err) {
+        } catch (err) {
         // On error, try to send an error event before closing
         const errorMessage = err instanceof Error ? err.message : "Unknown error";
         const errorChunk = `data: ${JSON.stringify({ error: { message: errorMessage, type: "server_error" } })}\n\n`;
