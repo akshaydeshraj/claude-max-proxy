@@ -53,7 +53,7 @@ describe("GET /auth/me", () => {
 
   it("returns 401 for invalid JWT cookie", async () => {
     const res = await app.request("/auth/me", {
-      headers: { Cookie: "session=invalid-token" },
+      headers: { Cookie: "cmp_session=invalid-token" },
     });
     expect(res.status).toBe(401);
   });
@@ -61,7 +61,7 @@ describe("GET /auth/me", () => {
   it("returns user info for valid JWT cookie", async () => {
     const token = await createJWT("user@example.com");
     const res = await app.request("/auth/me", {
-      headers: { Cookie: `session=${token}` },
+      headers: { Cookie: `cmp_session=${token}` },
     });
     expect(res.status).toBe(200);
     const body = await res.json();

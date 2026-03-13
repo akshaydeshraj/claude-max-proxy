@@ -111,7 +111,7 @@ auth.get("/auth/callback", async (c) => {
 
     c.header(
       "Set-Cookie",
-      `session=${jwt}; HttpOnly; Path=/; Max-Age=${7 * 24 * 60 * 60}; SameSite=Lax${config.publicUrl.startsWith("https") ? "; Secure" : ""}`,
+      `cmp_session=${jwt}; HttpOnly; Path=/; Max-Age=${7 * 24 * 60 * 60}; SameSite=Lax${config.publicUrl.startsWith("https") ? "; Secure" : ""}`,
     );
 
     return c.redirect("/");
@@ -129,7 +129,7 @@ auth.get("/auth/me", async (c) => {
     return c.json({ authenticated: false }, 401);
   }
 
-  const match = cookie.match(/session=([^;]+)/);
+  const match = cookie.match(/cmp_session=([^;]+)/);
   if (!match) {
     return c.json({ authenticated: false }, 401);
   }
@@ -148,7 +148,7 @@ auth.get("/auth/me", async (c) => {
 auth.get("/auth/logout", (c) => {
   c.header(
     "Set-Cookie",
-    "session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax",
+    "cmp_session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax",
   );
   return c.redirect("/");
 });

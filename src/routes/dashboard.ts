@@ -23,7 +23,7 @@ async function dashboardAuth(
   }
 
   const cookie = c.req.header("Cookie");
-  const match = cookie?.match(/session=([^;]+)/);
+  const match = cookie?.match(/cmp_session=([^;]+)/);
   if (!match) {
     return c.redirect("/auth/google");
   }
@@ -46,7 +46,7 @@ dashboard.get("/", async (c) => {
   // Inline auth check — redirect to login if not authenticated
   if (config.googleClientId) {
     const cookie = c.req.header("Cookie");
-    const match = cookie?.match(/session=([^;]+)/);
+    const match = cookie?.match(/cmp_session=([^;]+)/);
     if (!match) return c.redirect("/auth/google");
     const user = await verifyJWT(match[1]);
     if (!user) return c.redirect("/auth/google");
