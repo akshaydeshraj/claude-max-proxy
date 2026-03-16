@@ -22,7 +22,8 @@ COPY --from=builder /app/dist/ ./dist/
 
 # Create non-root user (claude CLI refuses --dangerously-skip-permissions as root)
 RUN useradd -m -s /bin/bash claude && \
-    chown -R claude:claude /app
+    mkdir -p /data && \
+    chown -R claude:claude /app /data
 USER claude
 
 # Persistent volumes for SQLite and Claude CLI credentials
